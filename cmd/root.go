@@ -1,7 +1,10 @@
 package cmd
 
 import (
+	"encoding/base64"
 	"fmt"
+	"log"
+	"net/http"
 	"os"
 
 	"github.com/gocolly/colly"
@@ -23,25 +26,41 @@ var (
 	}
 )
 
+func basicAuth(username, password string) string {
+	auth := username + ":" + password
+	return base64.StdEncoding.EncodeToString([]byte(auth))
+}
+
 func mainRun(cmd *cobra.Command, args []string) {
 	c := colly.NewCollector(
 		colly.UserAgent("Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/41.0.2228.0 Safari/537.36"),
 	)
 
-	// extensions.RandomUserAgent(c)
+	hdr := http.Header{}
+	hdr.Set("Authorization", "Basic "+basicAuth("test", "test"))
 
 	c.OnHTML("img", func(e *colly.HTMLElement) {
 		link := e.Attr("src")
-		fmt.Println(e.Request.AbsoluteURL(link))
+		log.Println(e.Request.AbsoluteURL(link))
 		c.Visit(e.Request.AbsoluteURL(link))
 	})
 
 	c.OnResponse(func(r *colly.Response) {
-		r.Save("./" + r.FileName())
+		cleanFName := colly.SanitizeFileName(r.FileName())
+		r.Save("./" + cleanFName)
 	})
 
-	c.Visit(args[0])
+	c.OnResponse(func(r *colly.Response) {
+		// for debugging
+		log.Println("response received", r.StatusCode)
+	})
 
+	c.OnError(func(r *colly.Response, err error) {
+		log.Println("Request URL:", r.Request.URL, "\nError:", err)
+		// 認証オプションの使用を勧める
+	})
+
+	c.Request("GET", args[0], nil, nil, hdr)
 }
 
 // Execute executes the root command.
