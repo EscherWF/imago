@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/gocolly/colly"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -15,16 +16,33 @@ var (
 
 	rootCmd = &cobra.Command{
 		Use:   "imgo",
-		Short: "A generator for Cobra based Applications",
-		Long: `Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
-		Args: cobra.MinimumNArgs(1),
-		Run: func(cmd *cobra.Command, args []string)  {
-			fmt.Println(args)
-		},
+		Short: "short description.",
+		Long:  "Long description.\nLong description.",
+		Args:  cobra.MinimumNArgs(1),
+		Run:   mainRun,
 	}
 )
+
+func mainRun(cmd *cobra.Command, args []string) {
+	c := colly.NewCollector(
+		colly.UserAgent("Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/41.0.2228.0 Safari/537.36"),
+	)
+
+	// extensions.RandomUserAgent(c)
+
+	c.OnHTML("img", func(e *colly.HTMLElement) {
+		link := e.Attr("src")
+		fmt.Println(e.Request.AbsoluteURL(link))
+		c.Visit(e.Request.AbsoluteURL(link))
+	})
+
+	c.OnResponse(func(r *colly.Response) {
+		r.Save("./" + r.FileName())
+	})
+
+	c.Visit(args[0])
+
+}
 
 // Execute executes the root command.
 func Execute() error {
