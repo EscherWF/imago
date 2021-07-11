@@ -112,12 +112,6 @@ func mainRun(cmd *cobra.Command, args []string) {
 		}
 	})
 
-	c.OnHTML("svg", func(e *colly.HTMLElement) {
-		// link := e.Attr("src")
-		// link = strings.TrimSpace(link)
-		// c.Visit(e.Request.AbsoluteURL(link))
-	})
-
 	c.OnHTML("*[style]", func(e *colly.HTMLElement) {
 		style := e.Attr("style")
 		pattUrl := regexp.MustCompile(`.*background-image:url\((.*)\).*`)
