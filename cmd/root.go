@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gocolly/colly"
 	"github.com/spf13/cobra"
@@ -18,8 +19,7 @@ import (
 
 var (
 	// Used for flags.
-	cfgFile     string
-	userLicense string
+	cfgFile string
 
 	rootCmd = &cobra.Command{
 		Use:   "imgo",
@@ -52,13 +52,30 @@ type localImage struct {
 }
 
 func (iu *localImage) __init() {
-	ext, _ := mime.ExtensionsByType(iu.contentType)
+	var extention = ""
+	exts, _ := mime.ExtensionsByType(iu.contentType)
 	iu.basename = colly.SanitizeFileName(iu.basename)
 
-	if len(ext) > 0 {
-		pattUrl := regexp.MustCompile(`.unknown$`)
-		iu.basename = pattUrl.ReplaceAllString(iu.basename, ext[0])
+	// TODO: ここ直す
+	switch len(exts) {
+	case 1:
+		extention = exts[0]
+	case 2:
+		extention = exts[1]
+	case 3:
+		extention = exts[1]
 	}
+
+	pattUrl := regexp.MustCompile(`.unknown$`)
+	iu.basename = pattUrl.ReplaceAllString(iu.basename, extention)
+	pattUrl = regexp.MustCompile(`.*` + extention + `$`)
+
+	if pattUrl.MatchString(iu.basename) {
+		return
+	}
+
+	iu.basename += extention
+
 }
 
 func newlocalImage(basename string, contentType string) *localImage {
@@ -91,6 +108,14 @@ func basicAuth(user, pass string) string {
 }
 
 func mainRun(cmd *cobra.Command, args []string) {
+
+	limit, _ := cmd.Flags().GetInt("limit")
+	delay, _ := cmd.Flags().GetInt("delay")
+	dest, _ := cmd.Flags().GetString("dest")
+	user, _ := cmd.Flags().GetString("user")
+	cookies, _ := cmd.Flags().GetStringArray("cookie")
+	isVerbose, _ := cmd.Flags().GetBool("verbose")
+
 	var seq = 0
 
 	userAgent := []string{
@@ -103,8 +128,26 @@ func mainRun(cmd *cobra.Command, args []string) {
 		colly.UserAgent(strings.Join(userAgent, " ")),
 	)
 
+	// Set Cookies
+	if len(cookies) > 0 {
+		var cookieList []*http.Cookie
+		for _, cookie := range cookies {
+			info := strings.Split(cookie, ":")
+			cookieList = append(cookieList,
+				&http.Cookie{
+					Name:  info[0],
+					Value: info[1],
+				})
+		}
+		c.SetCookies(args[0], cookieList)
+	}
+
 	hdr := http.Header{}
-	hdr.Set("Authorization", "Basic "+basicAuth("test", "test"))
+	// Basic Autenticate
+	if user != "" {
+		info := strings.Split(user, ":")
+		hdr.Set("Authorization", "Basic "+basicAuth(info[0], info[1]))
+	}
 
 	c.OnHTML("img, source", func(e *colly.HTMLElement) {
 		for _, url := range *imageUrls(e) {
@@ -112,21 +155,22 @@ func mainRun(cmd *cobra.Command, args []string) {
 		}
 	})
 
-	c.OnHTML("*[style]", func(e *colly.HTMLElement) {
-		style := e.Attr("style")
-		pattUrl := regexp.MustCompile(`.*background-image:url\((.*)\).*`)
-		styleImage := pattUrl.FindStringSubmatch(style)
-		if styleImage == nil {
-			return
-		}
+	// TODO: background-imageからも画像取得したい
+	// c.OnHTML("*[style]", func(e *colly.HTMLElement) {
+	// 	style := e.Attr("style")
+	// 	pattUrl := regexp.MustCompile(`.*background-image:url\((.*)\).*`)
+	// 	styleImage := pattUrl.FindStringSubmatch(style)
+	// 	if styleImage == nil {
+	// 		return
+	// 	}
 
-		iu := newImageUrl(styleImage[0])
-		c.Visit(e.Request.AbsoluteURL(iu.url))
-	})
+	// 	iu := newImageUrl(styleImage[0])
+	// 	c.Visit(e.Request.AbsoluteURL(iu.url))
+	// })
 
 	c.OnRequest(func(r *colly.Request) {
 		pattBs64 := regexp.MustCompile(`image\/([\S\D]+);base64,`)
-		if isBs64 := pattBs64.MatchString(r.URL.Opaque); isBs64 {
+		if pattBs64.MatchString(r.URL.Opaque) && limit > seq {
 			r.Abort()
 
 			var extention = "unknown"
@@ -142,7 +186,7 @@ func mainRun(cmd *cobra.Command, args []string) {
 				log.Println(err.Error())
 			}
 
-			seq += 1
+			seq++
 			f, err := os.Create("base64Image_" + strconv.Itoa(seq) + "." + extention)
 			if err != nil {
 				log.Println(err.Error())
@@ -162,29 +206,33 @@ func mainRun(cmd *cobra.Command, args []string) {
 
 	c.OnResponse(func(r *colly.Response) {
 		contentType := r.Headers.Get("content-type")
-		if isImage := strings.Contains(contentType, "image/"); !isImage {
+		if !strings.Contains(contentType, "image/") {
 			return
 		}
 
-		li := newlocalImage(r.FileName(), contentType)
-		err := r.Save("./" + li.basename)
-		if err != nil {
-			log.Println(err.Error())
+		if limit > seq {
+			li := newlocalImage(r.FileName(), contentType)
+			// TODO: destのIOエラーハンドリング
+			err := r.Save(dest + li.basename)
+			if err != nil {
+				log.Println(err.Error())
+			}
+			seq++
 		}
-		// for debugging
-		log.Println("response url", r.Request.URL, r.StatusCode)
+		if isVerbose {
+			log.Println("response url", r.Request.URL, r.StatusCode)
+		}
 	})
 
-	// c.OnError(func(r *colly.Response, err error) {
-	// 	log.Println("Request URL:", r.Request.URL, "\nError:", err)
-	// 	// unautorizedなら、認証オプションの使用を勧める
-	// })
+	c.OnError(func(r *colly.Response, err error) {
+		log.Println("Request URL:", r.Request.URL, "\nError:", err)
+	})
 
-	// リクエスト間隔（Delay）
-	// c.Limit(&colly.LimitRule{
-	// 	DomainGlob: "*",
-	// 	Delay:      10 * time.Second,
-	// })
+	// Delay
+	c.Limit(&colly.LimitRule{
+		DomainGlob: "*",
+		Delay:      time.Duration(delay) * time.Second,
+	})
 
 	c.Request("GET", args[0], nil, nil, hdr)
 }
@@ -197,17 +245,12 @@ func Execute() error {
 func init() {
 	cobra.OnInitialize(initConfig)
 
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.cobra.yaml)")
-	rootCmd.PersistentFlags().StringP("author", "a", "YOUR NAME", "author name for copyright attribution")
-	rootCmd.PersistentFlags().StringVarP(&userLicense, "license", "l", "", "name of license for the project")
-	rootCmd.PersistentFlags().Bool("viper", true, "use Viper for configuration")
-	viper.BindPFlag("author", rootCmd.PersistentFlags().Lookup("author"))
-	viper.BindPFlag("useViper", rootCmd.PersistentFlags().Lookup("viper"))
-	viper.SetDefault("author", "NAME HERE <EMAIL ADDRESS>")
-	viper.SetDefault("license", "apache")
-
-	// rootCmd.AddCommand(addCmd)
-	// rootCmd.AddCommand(initCmd)
+	rootCmd.PersistentFlags().StringArrayP("cookie", "c", []string{}, "You can set multiple cookies. For example, -c key1:value1 -c key2:value2 ...")
+	rootCmd.PersistentFlags().IntP("limit", "l", 256, "Specify the maximum number of images to save.")
+	rootCmd.PersistentFlags().IntP("delay", "d", 0, "Specify the number of seconds between image requests.")
+	rootCmd.PersistentFlags().String("dest", "./", "Specify the directory to output the images.")
+	rootCmd.PersistentFlags().StringP("user", "u", "", "Specify the information for BASIC authentication. For example, username:password.")
+	rootCmd.PersistentFlags().BoolP("verbose", "v", false, "verbose")
 }
 
 func initConfig() {

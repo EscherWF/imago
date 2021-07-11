@@ -6,15 +6,17 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const version = "1.0.0"
+
 func init() {
-  rootCmd.AddCommand(versionCmd)
+	rootCmd.AddCommand(versionCmd)
 }
 
 var versionCmd = &cobra.Command{
-  Use:   "version",
-  Short: "Print the version number of Hugo",
-  Long:  `All software has versions. This is Hugo's`,
-  Run: func(cmd *cobra.Command, args []string) {
-    fmt.Println("Hugo Static Site Generator v0.9 -- HEAD")
-  },
+	Use:   "version",
+	Short: "",
+	Long:  ``,
+	Run: func(cmd *cobra.Command, args []string) {
+		fmt.Println("v" + version)
+	},
 }
