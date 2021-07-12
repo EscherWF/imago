@@ -89,12 +89,11 @@ func mainRun(cmd *cobra.Command, args []string) {
 
 	c.OnHTML("img, source", func(e *colly.HTMLElement) {
 		for _, url := range *imageUrls(e) {
-			c.Visit(e.Request.AbsoluteURL(url.url))
+			c.Request("GET", e.Request.AbsoluteURL(url.url), nil, nil, header)
 		}
 	})
 
 	c.OnRequest(func(r *colly.Request) {
-		log.Println(r.Headers)
 		pattBs64 := regexp.MustCompile(`image\/([\S\D]+);base64,`)
 		if pattBs64.MatchString(r.URL.Opaque) && rootFlag.limit > seq {
 			r.Abort()
