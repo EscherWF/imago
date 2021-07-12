@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"encoding/base64"
-	"fmt"
 	"log"
 	"mime"
 	"net/http"
@@ -14,21 +13,164 @@ import (
 
 	"github.com/gocolly/colly"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
-var (
-	// Used for flags.
-	cfgFile string
+type RootFlag struct {
+	cookies  []string
+	dest     string
+	delay    int
+	limit    int
+	parallel int
+	user     string
+	verbose  bool
+}
 
-	rootCmd = &cobra.Command{
-		Use:   "imgo",
-		Short: "short description.",
-		Long:  "Long description.\nLong description.",
-		Args:  cobra.MinimumNArgs(1),
-		Run:   mainRun,
+var rootFlag RootFlag
+
+var rootCmd = &cobra.Command{
+	Use:   "imgo",
+	Short: "short description.",
+	Long:  "Long description.\nLong description.",
+	Args:  cobra.MinimumNArgs(1),
+	Run:   mainRun,
+}
+
+var userAgent = []string{
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+	"AppleWebKit/537.36 (KHTML, like Gecko)",
+	"Chrome/91.0.4472.124 Safari/537.36",
+}
+
+func mainRun(cmd *cobra.Command, args []string) {
+
+	var seq = 0
+	var url = args[0]
+
+	if rootFlag.delay < 0 || rootFlag.limit < 0 || rootFlag.parallel < 0 {
+		panic("The options should be positive integers.")
 	}
-)
+
+	// Check the existence of the directory
+	_, err := os.Stat(rootFlag.dest)
+	if os.IsNotExist(err) {
+		panic(err.Error())
+	}
+
+	// Basic Autenticate
+	header := http.Header{}
+	if rootFlag.user != "" {
+		user := strings.TrimSpace(rootFlag.user)
+		pattAuth := regexp.MustCompile(`^\S+[^\s:]+:[^\s:]+\S+$`)
+		if !pattAuth.MatchString(user) {
+			panic("The format of the given auth info is not correct.")
+		}
+
+		auth := base64.StdEncoding.EncodeToString([]byte(user))
+		header.Set("Authorization", "Basic "+auth)
+	}
+
+	// Cookies
+	var cookieList []*http.Cookie
+	if len(rootFlag.cookies) > 0 {
+		for _, cookie := range rootFlag.cookies {
+			kv := strings.Split(strings.TrimSpace(cookie), ":")
+			if len(kv) != 2 {
+				panic("The format of the given cookie is not correct.")
+			}
+
+			cookieList = append(cookieList, &http.Cookie{Name: kv[0], Value: kv[1]})
+		}
+	}
+
+	c := colly.NewCollector(
+		colly.UserAgent(strings.Join(userAgent, " ")),
+		colly.Async(true),
+	)
+
+	c.OnHTML("img, source", func(e *colly.HTMLElement) {
+		for _, url := range *imageUrls(e) {
+			c.Visit(e.Request.AbsoluteURL(url.url))
+		}
+	})
+
+	c.OnRequest(func(r *colly.Request) {
+		log.Println(r.Headers)
+		pattBs64 := regexp.MustCompile(`image\/([\S\D]+);base64,`)
+		if pattBs64.MatchString(r.URL.Opaque) && rootFlag.limit > seq {
+			r.Abort()
+
+			var extention = "unknown"
+			contentType := "image/" + pattBs64.FindStringSubmatch(r.URL.Opaque)[1]
+			exts, _ := mime.ExtensionsByType(contentType)
+			if len(exts) > 0 {
+				extention = exts[0]
+			}
+
+			bs64 := pattBs64.ReplaceAllString(r.URL.Opaque, "")
+			dec, err := base64.StdEncoding.DecodeString(bs64)
+			if err != nil {
+				log.Println(err.Error())
+			}
+
+			seq++
+
+			f, err := os.Create("base64Image_" + strconv.Itoa(seq) + "." + extention)
+			if err != nil {
+				log.Println(err.Error())
+			}
+			defer f.Close()
+
+			_, err = f.Write(dec)
+			if err != nil {
+				log.Println(err.Error())
+			}
+			err = f.Sync()
+			if err != nil {
+				log.Println(err.Error())
+			}
+		}
+	})
+
+	c.OnResponse(func(r *colly.Response) {
+		contentType := r.Headers.Get("content-type")
+		if !strings.Contains(contentType, "image/") {
+			return
+		}
+
+		if rootFlag.limit > seq {
+			li := newlocalImage(r.FileName(), contentType)
+			err := r.Save(rootFlag.dest + li.basename)
+			if err != nil {
+				log.Println(err.Error())
+			}
+
+			seq++
+
+			if rootFlag.verbose {
+				log.Println("response url", r.Request.URL, r.StatusCode)
+			}
+		}
+	})
+
+	c.OnError(func(r *colly.Response, err error) {
+		log.Println("Error:", err, r.Request.URL)
+	})
+
+	// Delay & Parallel connections
+	c.Limit(&colly.LimitRule{
+		DomainGlob:  "*",
+		Parallelism: rootFlag.parallel,
+		Delay:       time.Duration(rootFlag.delay) * time.Second,
+	})
+	c.SetCookies(url, cookieList)
+	c.Request("GET", url, nil, nil, header)
+	c.Wait()
+}
+
+// Execute executes the root command.
+func Execute() error {
+	return rootCmd.Execute()
+}
 
 type imageUrl struct {
 	url string
@@ -102,180 +244,37 @@ func imageUrls(e *colly.HTMLElement) *[]imageUrl {
 	return &urls
 }
 
-func basicAuth(user, pass string) string {
-	auth := user + ":" + pass
-	return base64.StdEncoding.EncodeToString([]byte(auth))
-}
-
-func mainRun(cmd *cobra.Command, args []string) {
-
-	cookies, _ := cmd.Flags().GetStringArray("cookie")
-	dest, _ := cmd.Flags().GetString("dest")
-	delay, _ := cmd.Flags().GetInt("delay")
-	limit, _ := cmd.Flags().GetInt("limit")
-	parallel, _ := cmd.Flags().GetInt("parallel")
-	user, _ := cmd.Flags().GetString("user")
-	isVerbose, _ := cmd.Flags().GetBool("verbose")
-
-	var seq = 0
-
-	userAgent := []string{
-		"Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-		"AppleWebKit/537.36 (KHTML, like Gecko)",
-		"Chrome/91.0.4472.124 Safari/537.36",
-	}
-
-	c := colly.NewCollector(
-		colly.UserAgent(strings.Join(userAgent, " ")),
-		colly.Async(true),
-	)
-
-	// Delay & Parallel connections
-	c.Limit(&colly.LimitRule{
-		DomainGlob:  "*",
-		Parallelism: parallel,
-		Delay:       time.Duration(delay) * time.Second,
-	})
-
-	// Cookies
-	if len(cookies) > 0 {
-		var cookieList []*http.Cookie
-		for _, cookie := range cookies {
-			info := strings.Split(cookie, ":")
-			cookieList = append(cookieList,
-				&http.Cookie{
-					Name:  info[0],
-					Value: info[1],
-				})
-		}
-		c.SetCookies(args[0], cookieList)
-	}
-
-	hdr := http.Header{}
-	// Basic Autenticate
-	if user != "" {
-		info := strings.Split(user, ":")
-		hdr.Set("Authorization", "Basic "+basicAuth(info[0], info[1]))
-	}
-
-	c.OnHTML("img, source", func(e *colly.HTMLElement) {
-		for _, url := range *imageUrls(e) {
-			c.Visit(e.Request.AbsoluteURL(url.url))
-		}
-	})
-
-	// TODO: background-imageからも画像取得したい
-	// c.OnHTML("*[style]", func(e *colly.HTMLElement) {
-	// 	style := e.Attr("style")
-	// 	pattUrl := regexp.MustCompile(`.*background-image:url\((.*)\).*`)
-	// 	styleImage := pattUrl.FindStringSubmatch(style)
-	// 	if styleImage == nil {
-	// 		return
-	// 	}
-
-	// 	iu := newImageUrl(styleImage[0])
-	// 	c.Visit(e.Request.AbsoluteURL(iu.url))
-	// })
-
-	c.OnRequest(func(r *colly.Request) {
-		pattBs64 := regexp.MustCompile(`image\/([\S\D]+);base64,`)
-		if pattBs64.MatchString(r.URL.Opaque) && limit > seq {
-			r.Abort()
-
-			var extention = "unknown"
-			contentType := "image/" + pattBs64.FindStringSubmatch(r.URL.Opaque)[1]
-			exts, _ := mime.ExtensionsByType(contentType)
-			if len(exts) > 0 {
-				extention = exts[0]
-			}
-
-			bs64 := pattBs64.ReplaceAllString(r.URL.Opaque, "")
-			dec, err := base64.StdEncoding.DecodeString(bs64)
-			if err != nil {
-				log.Println(err.Error())
-			}
-
-			seq++
-			f, err := os.Create("base64Image_" + strconv.Itoa(seq) + "." + extention)
-			if err != nil {
-				log.Println(err.Error())
-			}
-			defer f.Close()
-
-			_, err = f.Write(dec)
-			if err != nil {
-				log.Println(err.Error())
-			}
-			err = f.Sync()
-			if err != nil {
-				log.Println(err.Error())
-			}
-		}
-	})
-
-	c.OnResponse(func(r *colly.Response) {
-		contentType := r.Headers.Get("content-type")
-		if !strings.Contains(contentType, "image/") {
-			return
-		}
-
-		if limit > seq {
-			li := newlocalImage(r.FileName(), contentType)
-			// TODO: destのIOエラーハンドリング
-			err := r.Save(dest + li.basename)
-			if err != nil {
-				log.Println(err.Error())
-			}
-			seq++
-		}
-		if isVerbose {
-			log.Println("response url", r.Request.URL, r.StatusCode)
-		}
-	})
-
-	c.OnError(func(r *colly.Response, err error) {
-		log.Println("Request URL:", r.Request.URL, "\nError:", err)
-	})
-
-	c.Request("GET", args[0], nil, nil, hdr)
-	c.Wait()
-}
-
-// Execute executes the root command.
-func Execute() error {
-	return rootCmd.Execute()
-}
-
 func init() {
 	cobra.OnInitialize(initConfig)
 
-	rootCmd.PersistentFlags().StringArrayP("cookie", "c", []string{}, "You can set multiple cookies. For example, -c key1:value1 -c key2:value2 ...")
-	rootCmd.PersistentFlags().String("dest", "./", "Specify the directory to output the images.")
-	rootCmd.PersistentFlags().IntP("delay", "d", 0, "Specify the number of seconds between image requests.")
-	rootCmd.PersistentFlags().IntP("limit", "l", 256, "Specify the maximum number of images to save.")
-	rootCmd.PersistentFlags().Int("parallel", 5, "Specify the number of parallel HTTP requests.")
-	rootCmd.PersistentFlags().StringP("user", "u", "", "Specify the information for BASIC authentication. For example, username:password.")
-	rootCmd.PersistentFlags().BoolP("verbose", "v", false, "verbose")
+	persistentFlags := rootCmd.PersistentFlags()
+	persistentFlags.StringArrayVarP(&rootFlag.cookies, "cookies", "c", []string{}, "You can set multiple cookies. For example, -c key1:value1 -c key2:value2 ...")
+	persistentFlags.StringVar(&rootFlag.dest, "dest", "./", "Specify the directory to output the images.")
+	persistentFlags.IntVarP(&rootFlag.delay, "delay", "d", 0, "Specify the number of seconds between image requests.")
+	persistentFlags.IntVarP(&rootFlag.limit, "limit", "l", 256, "Specify the maximum number of images to save.")
+	persistentFlags.IntVar(&rootFlag.parallel, "parallel", 5, "Specify the number of parallel HTTP requests.")
+	persistentFlags.StringVarP(&rootFlag.user, "user", "u", "", "Specify the information for BASIC authentication. For example, username:password.")
+	persistentFlags.BoolVarP(&rootFlag.verbose, "verbose", "v", false, "verbose")
 }
 
 func initConfig() {
-	if cfgFile != "" {
-		// Use config file from the flag.
-		viper.SetConfigFile(cfgFile)
-	} else {
-		// Find home directory.
-		home, err := os.UserHomeDir()
-		cobra.CheckErr(err)
+	// if cfgFile != "" {
+	// 	// Use config file from the flag.
+	// 	viper.SetConfigFile(cfgFile)
+	// } else {
+	// 	// Find home directory.
+	// 	home, err := os.UserHomeDir()
+	// 	cobra.CheckErr(err)
 
-		// Search config in home directory with name ".cobra" (without extension).
-		viper.AddConfigPath(home)
-		viper.SetConfigType("yaml")
-		viper.SetConfigName(".cobra")
-	}
+	// 	// Search config in home directory with name ".cobra" (without extension).
+	// 	viper.AddConfigPath(home)
+	// 	viper.SetConfigType("yaml")
+	// 	viper.SetConfigName(".cobra")
+	// }
 
-	viper.AutomaticEnv()
+	// viper.AutomaticEnv()
 
-	if err := viper.ReadInConfig(); err == nil {
-		fmt.Println("Using config file:", viper.ConfigFileUsed())
-	}
+	// if err := viper.ReadInConfig(); err == nil {
+	// 	fmt.Println("Using config file:", viper.ConfigFileUsed())
+	// }
 }
