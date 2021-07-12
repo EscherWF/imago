@@ -109,11 +109,12 @@ func basicAuth(user, pass string) string {
 
 func mainRun(cmd *cobra.Command, args []string) {
 
-	limit, _ := cmd.Flags().GetInt("limit")
-	delay, _ := cmd.Flags().GetInt("delay")
-	dest, _ := cmd.Flags().GetString("dest")
-	user, _ := cmd.Flags().GetString("user")
 	cookies, _ := cmd.Flags().GetStringArray("cookie")
+	dest, _ := cmd.Flags().GetString("dest")
+	delay, _ := cmd.Flags().GetInt("delay")
+	limit, _ := cmd.Flags().GetInt("limit")
+	parallel, _ := cmd.Flags().GetInt("parallel")
+	user, _ := cmd.Flags().GetString("user")
 	isVerbose, _ := cmd.Flags().GetBool("verbose")
 
 	var seq = 0
@@ -126,9 +127,17 @@ func mainRun(cmd *cobra.Command, args []string) {
 
 	c := colly.NewCollector(
 		colly.UserAgent(strings.Join(userAgent, " ")),
+		colly.Async(true),
 	)
 
-	// Set Cookies
+	// Delay & Parallel connections
+	c.Limit(&colly.LimitRule{
+		DomainGlob:  "*",
+		Parallelism: parallel,
+		Delay:       time.Duration(delay) * time.Second,
+	})
+
+	// Cookies
 	if len(cookies) > 0 {
 		var cookieList []*http.Cookie
 		for _, cookie := range cookies {
@@ -228,13 +237,8 @@ func mainRun(cmd *cobra.Command, args []string) {
 		log.Println("Request URL:", r.Request.URL, "\nError:", err)
 	})
 
-	// Delay
-	c.Limit(&colly.LimitRule{
-		DomainGlob: "*",
-		Delay:      time.Duration(delay) * time.Second,
-	})
-
 	c.Request("GET", args[0], nil, nil, hdr)
+	c.Wait()
 }
 
 // Execute executes the root command.
@@ -246,9 +250,10 @@ func init() {
 	cobra.OnInitialize(initConfig)
 
 	rootCmd.PersistentFlags().StringArrayP("cookie", "c", []string{}, "You can set multiple cookies. For example, -c key1:value1 -c key2:value2 ...")
-	rootCmd.PersistentFlags().IntP("limit", "l", 256, "Specify the maximum number of images to save.")
-	rootCmd.PersistentFlags().IntP("delay", "d", 0, "Specify the number of seconds between image requests.")
 	rootCmd.PersistentFlags().String("dest", "./", "Specify the directory to output the images.")
+	rootCmd.PersistentFlags().IntP("delay", "d", 0, "Specify the number of seconds between image requests.")
+	rootCmd.PersistentFlags().IntP("limit", "l", 256, "Specify the maximum number of images to save.")
+	rootCmd.PersistentFlags().Int("parallel", 5, "Specify the number of parallel HTTP requests.")
 	rootCmd.PersistentFlags().StringP("user", "u", "", "Specify the information for BASIC authentication. For example, username:password.")
 	rootCmd.PersistentFlags().BoolP("verbose", "v", false, "verbose")
 }

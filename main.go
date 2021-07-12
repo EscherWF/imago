@@ -1,8 +1,6 @@
 package main
 
-import "test/imgo/cmd"
-
-
+import "imgo/cmd"
 
 func main() {
 	cmd.Execute()
