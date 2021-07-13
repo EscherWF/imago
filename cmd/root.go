@@ -19,6 +19,7 @@ type RootFlag struct {
 	cookies  []string
 	dest     string
 	delay    int
+	headers  []string
 	limit    int
 	parallel int
 	user     string
@@ -56,8 +57,8 @@ func mainRun(cmd *cobra.Command, args []string) {
 		panic(err.Error())
 	}
 
-	// Basic Autenticate
-	header := http.Header{}
+	// Basic Autenticate header
+	hdr := http.Header{}
 	if rootFlag.user != "" {
 		user := strings.TrimSpace(rootFlag.user)
 		pattAuth := regexp.MustCompile(`^\S+[^\s:]+:[^\s:]+\S+$`)
@@ -66,7 +67,18 @@ func mainRun(cmd *cobra.Command, args []string) {
 		}
 
 		auth := base64.StdEncoding.EncodeToString([]byte(user))
-		header.Set("Authorization", "Basic "+auth)
+		hdr.Set("Authorization", "Basic "+auth)
+	}
+
+	// Other headers
+	if len(rootFlag.headers) > 0 {
+		for _, header := range rootFlag.headers {
+			kv := strings.Split(strings.TrimSpace(header), ":")
+			if len(kv) != 2 {
+				panic("The format of the given header is not correct.")
+			}
+			hdr.Set(kv[0], kv[1])
+		}
 	}
 
 	// Cookies
@@ -89,7 +101,7 @@ func mainRun(cmd *cobra.Command, args []string) {
 
 	c.OnHTML("img, source", func(e *colly.HTMLElement) {
 		for _, url := range *imageUrls(e) {
-			c.Request("GET", e.Request.AbsoluteURL(url.url), nil, nil, header)
+			c.Request("GET", e.Request.AbsoluteURL(url.url), nil, nil, hdr)
 		}
 	})
 
@@ -162,7 +174,7 @@ func mainRun(cmd *cobra.Command, args []string) {
 		Delay:       time.Duration(rootFlag.delay) * time.Second,
 	})
 	c.SetCookies(url, cookieList)
-	c.Request("GET", url, nil, nil, header)
+	c.Request("GET", url, nil, nil, hdr)
 	c.Wait()
 }
 
@@ -247,9 +259,10 @@ func init() {
 	cobra.OnInitialize(initConfig)
 
 	persistentFlags := rootCmd.PersistentFlags()
-	persistentFlags.StringArrayVarP(&rootFlag.cookies, "cookies", "c", []string{}, "You can set multiple cookies. For example, -c key1:value1 -c key2:value2 ...")
+	persistentFlags.StringArrayVarP(&rootFlag.cookies, "cookies", "C", []string{}, "You can set multiple cookies. For example, -c key1:value1 -c key2:value2 ...")
 	persistentFlags.StringVar(&rootFlag.dest, "dest", "./", "Specify the directory to output the images.")
 	persistentFlags.IntVarP(&rootFlag.delay, "delay", "d", 0, "Specify the number of seconds between image requests.")
+	persistentFlags.StringArrayVarP(&rootFlag.headers, "headers", "H", []string{}, "You can set multiple headers. For example, -c key1:value1 -c key2:value2 ...")
 	persistentFlags.IntVarP(&rootFlag.limit, "limit", "l", 256, "Specify the maximum number of images to save.")
 	persistentFlags.IntVar(&rootFlag.parallel, "parallel", 5, "Specify the number of parallel HTTP requests.")
 	persistentFlags.StringVarP(&rootFlag.user, "user", "u", "", "Specify the information for BASIC authentication. For example, username:password.")
