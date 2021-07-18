@@ -30,8 +30,8 @@ var rootFlag RootFlag
 
 var rootCmd = &cobra.Command{
 	Use:   "imgo",
-	Short: "short description.",
-	Long:  "Long description.\nLong description.",
+	Short: "Scrapes only images.",
+	Long:  "A command to scrape only images. The scraped images will be saved in the specified directory.",
 	Args:  cobra.MinimumNArgs(1),
 	Run:   mainRun,
 }
@@ -106,7 +106,7 @@ func mainRun(cmd *cobra.Command, args []string) {
 	})
 
 	c.OnRequest(func(r *colly.Request) {
-		pattBs64 := regexp.MustCompile(`image\/([\S\D]+);base64,`)
+		pattBs64 := regexp.MustCompile(`image\/([\S\D]+)`)
 		if pattBs64.MatchString(r.URL.Opaque) && rootFlag.limit > seq {
 			r.Abort()
 
@@ -158,7 +158,7 @@ func mainRun(cmd *cobra.Command, args []string) {
 			seq++
 
 			if rootFlag.verbose {
-				log.Println("response url", r.Request.URL, r.StatusCode)
+				log.Println(r.Request.URL)
 			}
 		}
 	})
@@ -256,37 +256,17 @@ func imageUrls(e *colly.HTMLElement) *[]imageUrl {
 }
 
 func init() {
-	cobra.OnInitialize(initConfig)
-
 	persistentFlags := rootCmd.PersistentFlags()
 	persistentFlags.StringArrayVarP(&rootFlag.cookies, "cookies", "C", []string{}, "You can set multiple cookies. For example, -c key1:value1 -c key2:value2 ...")
 	persistentFlags.StringVar(&rootFlag.dest, "dest", "./", "Specify the directory to output the images.")
+<<<<<<< Updated upstream
 	persistentFlags.IntVarP(&rootFlag.delay, "delay", "d", 0, "Specify the number of seconds between image requests.")
 	persistentFlags.StringArrayVarP(&rootFlag.headers, "headers", "H", []string{}, "You can set multiple headers. For example, -c key1:value1 -c key2:value2 ...")
+=======
+	persistentFlags.IntVarP(&rootFlag.delay, "delay", "d", 3, "Specify the number of seconds between image requests.")
+>>>>>>> Stashed changes
 	persistentFlags.IntVarP(&rootFlag.limit, "limit", "l", 256, "Specify the maximum number of images to save.")
 	persistentFlags.IntVar(&rootFlag.parallel, "parallel", 5, "Specify the number of parallel HTTP requests.")
 	persistentFlags.StringVarP(&rootFlag.user, "user", "u", "", "Specify the information for BASIC authentication. For example, username:password.")
 	persistentFlags.BoolVarP(&rootFlag.verbose, "verbose", "v", false, "verbose")
-}
-
-func initConfig() {
-	// if cfgFile != "" {
-	// 	// Use config file from the flag.
-	// 	viper.SetConfigFile(cfgFile)
-	// } else {
-	// 	// Find home directory.
-	// 	home, err := os.UserHomeDir()
-	// 	cobra.CheckErr(err)
-
-	// 	// Search config in home directory with name ".cobra" (without extension).
-	// 	viper.AddConfigPath(home)
-	// 	viper.SetConfigType("yaml")
-	// 	viper.SetConfigName(".cobra")
-	// }
-
-	// viper.AutomaticEnv()
-
-	// if err := viper.ReadInConfig(); err == nil {
-	// 	fmt.Println("Using config file:", viper.ConfigFileUsed())
-	// }
 }
