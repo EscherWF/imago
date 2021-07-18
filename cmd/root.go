@@ -259,12 +259,7 @@ func init() {
 	persistentFlags := rootCmd.PersistentFlags()
 	persistentFlags.StringArrayVarP(&rootFlag.cookies, "cookies", "C", []string{}, "You can set multiple cookies. For example, -c key1:value1 -c key2:value2 ...")
 	persistentFlags.StringVar(&rootFlag.dest, "dest", "./", "Specify the directory to output the images.")
-<<<<<<< Updated upstream
-	persistentFlags.IntVarP(&rootFlag.delay, "delay", "d", 0, "Specify the number of seconds between image requests.")
-	persistentFlags.StringArrayVarP(&rootFlag.headers, "headers", "H", []string{}, "You can set multiple headers. For example, -c key1:value1 -c key2:value2 ...")
-=======
 	persistentFlags.IntVarP(&rootFlag.delay, "delay", "d", 3, "Specify the number of seconds between image requests.")
->>>>>>> Stashed changes
 	persistentFlags.IntVarP(&rootFlag.limit, "limit", "l", 256, "Specify the maximum number of images to save.")
 	persistentFlags.IntVar(&rootFlag.parallel, "parallel", 5, "Specify the number of parallel HTTP requests.")
 	persistentFlags.StringVarP(&rootFlag.user, "user", "u", "", "Specify the information for BASIC authentication. For example, username:password.")
