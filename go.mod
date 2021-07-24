@@ -1,4 +1,4 @@
-module imgo
+module github.com/EscherWF/imgo
 
 go 1.16
 
