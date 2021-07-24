@@ -1,6 +1,6 @@
 package main
 
-import "imgo/cmd"
+import "github.com/EscherWF/imgo/cmd"
 
 func main() {
 	cmd.Execute()
